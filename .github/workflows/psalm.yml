@@ -33,38 +33,48 @@ jobs:
           coverage: none
           tools: composer
 
-      # POPRAWIONY KROK: Obsługa braku composer.json
       - name: Install Dependencies & Psalm
         run: |
-          # Sprawdzamy czy istnieje composer.json
           if [ -f "composer.json" ]; then
             echo "Znaleziono composer.json. Instaluje zaleznosci..."
             composer install --prefer-dist --no-progress
           else
             echo "Nie znaleziono composer.json. Inicjalizuje tymczasowe srodowisko..."
-            # Tworzymy pusty plik composer.json tylko po to, by móc zainstalować Psalm
             composer init --name="security/scan" --type=project --require="php:>=8.1" -n
           fi
-          
-          # Instalujemy Psalm (skaner) niezależnie od struktury projektu
           composer require --dev vimeo/psalm
 
-      - name: Init Psalm config
+      # NAPRAWA: Zamiast edytować plik, tworzymy go od zera z poprawną treścią
+      - name: Create Psalm config
         run: |
-          if [ ! -f psalm.xml ]; then
-            vendor/bin/psalm --init
-            # Ustawiamy poziom błędów i włączamy analizę bezpieczeństwa
-            sed -i 's/<psalm/<psalm errorLevel="3"/' psalm.xml
-            # Dodajemy ignorowanie folderu vendor, żeby nie skanował bibliotek skanera
-            sed -i 's/<directory name="." \/>/<directory name="." \/><ignoreFiles><directory name="vendor" \/><\/ignoreFiles>/' psalm.xml
-          fi
+          cat <<EOF > psalm.xml
+          <?xml version="1.0"?>
+          <psalm
+              errorLevel="3"
+              resolveFromConfigFile="true"
+              xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+              xmlns="https://getpsalm.org/schema/config"
+              xsi:schemaLocation="https://getpsalm.org/schema/config vendor/vimeo/psalm/config.xsd"
+              findUnusedCode="false"
+          >
+              <projectFiles>
+                  <directory name="." />
+                  <ignoreFiles>
+                      <directory name="vendor" />
+                  </ignoreFiles>
+              </projectFiles>
+              <enableExtensions>
+                  <extension name="taint" />
+              </enableExtensions>
+          </psalm>
+          EOF
 
       - name: Run Psalm Security Scan
-        # Uruchamiamy skanowanie
         run: vendor/bin/psalm --report=results.sarif --taint-analysis --no-cache
         continue-on-error: true
 
       - name: Upload Security Analysis results to GitHub
-        uses: github/codeql-action/upload-sarif@v3
+        # Zaktualizowałem wersję akcji do v4, bo v3 wkrótce wygasa
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
