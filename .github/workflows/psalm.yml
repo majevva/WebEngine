@@ -1,0 +1,62 @@
+name: Psalm Security Scan
+
+on:
+  push:
+    branches: [ "master" ]
+  pull_request:
+    branches: [ "master" ]
+  schedule:
+    - cron: '22 13 * * 5'
+  workflow_dispatch: # Dodano możliwość ręcznego uruchamiania
+
+permissions:
+  contents: read
+
+jobs:
+  php-security:
+    name: Psalm Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # KROK 1: Ustawiamy PHP, żeby środowisko pasowało do WebEngine CMS
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+          extensions: pdo, gd, curl, openssl, mbstring, dom, xml
+          coverage: none
+
+      # KROK 2: Instalujemy zależności (bez tego skaner zgłupi się na PHPMailer itp.)
+      - name: Install Dependencies
+        run: |
+          composer validate --strict
+          # Instalujemy Psalm, jeśli nie ma go w composer.json
+          composer require --dev vimeo/psalm
+          composer install --prefer-dist --no-progress
+
+      # KROK 3: Inicjalizacja Psalma (tylko jeśli brakuje pliku konfiguracyjnego)
+      - name: Init Psalm config
+        run: |
+          if [ ! -f psalm.xml ]; then
+            vendor/bin/psalm --init
+            # Wymuszamy poziom 3 (bezpieczeństwo) i włączamy Taint Analysis
+            sed -i 's/<psalm/<psalm errorLevel="3"/' psalm.xml
+          fi
+
+      # KROK 4: Właściwe skanowanie bezpieczeństwa
+      - name: Run Psalm Security Scan
+        run: vendor/bin/psalm --report=results.sarif --taint-analysis --no-cache
+        continue-on-error: true # Ważne: nie przerywa workflow, żeby zdążył wysłać raport
+
+      # KROK 5: Wysyłanie wyników do zakładki "Security" w GitHub
+      - name: Upload Security Analysis results to GitHub
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
