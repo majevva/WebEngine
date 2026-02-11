@@ -20,11 +20,11 @@ jobs:
       contents: read
       security-events: write
       actions: read
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
+      
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
@@ -32,7 +32,7 @@ jobs:
           extensions: pdo, gd, curl, openssl, mbstring, dom, xml
           coverage: none
           tools: composer
-
+      
       - name: Install Dependencies & Psalm
         run: |
           if [ -f "composer.json" ]; then
@@ -43,11 +43,10 @@ jobs:
             composer init --name="security/scan" --type=project --require="php:>=8.1" -n
           fi
           composer require --dev vimeo/psalm
-
-      # NAPRAWA: Zamiast edytować plik, tworzymy go od zera z poprawną treścią
+      
       - name: Create Psalm config
         run: |
-          cat <<EOF > psalm.xml
+          cat <<'EOF' > psalm.xml
           <?xml version="1.0"?>
           <psalm
               errorLevel="3"
@@ -63,18 +62,15 @@ jobs:
                       <directory name="vendor" />
                   </ignoreFiles>
               </projectFiles>
-              <enableExtensions>
-                  <extension name="taint" />
-              </enableExtensions>
           </psalm>
           EOF
-
+      
       - name: Run Psalm Security Scan
         run: vendor/bin/psalm --report=results.sarif --taint-analysis --no-cache
         continue-on-error: true
-
+      
       - name: Upload Security Analysis results to GitHub
-        # Zaktualizowałem wersję akcji do v4, bo v3 wkrótce wygasa
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif
+        if: always()
