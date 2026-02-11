@@ -7,7 +7,7 @@ on:
     branches: [ "master" ]
   schedule:
     - cron: '22 13 * * 5'
-  workflow_dispatch: # Dodano możliwość ręcznego uruchamiania
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,37 +25,45 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # KROK 1: Ustawiamy PHP, żeby środowisko pasowało do WebEngine CMS
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
           php-version: '8.1'
           extensions: pdo, gd, curl, openssl, mbstring, dom, xml
           coverage: none
+          tools: composer
 
-      # KROK 2: Instalujemy zależności (bez tego skaner zgłupi się na PHPMailer itp.)
-      - name: Install Dependencies
+      # POPRAWIONY KROK: Obsługa braku composer.json
+      - name: Install Dependencies & Psalm
         run: |
-          composer validate --strict
-          # Instalujemy Psalm, jeśli nie ma go w composer.json
+          # Sprawdzamy czy istnieje composer.json
+          if [ -f "composer.json" ]; then
+            echo "Znaleziono composer.json. Instaluje zaleznosci..."
+            composer install --prefer-dist --no-progress
+          else
+            echo "Nie znaleziono composer.json. Inicjalizuje tymczasowe srodowisko..."
+            # Tworzymy pusty plik composer.json tylko po to, by móc zainstalować Psalm
+            composer init --name="security/scan" --type=project --require="php:>=8.1" -n
+          fi
+          
+          # Instalujemy Psalm (skaner) niezależnie od struktury projektu
           composer require --dev vimeo/psalm
-          composer install --prefer-dist --no-progress
 
-      # KROK 3: Inicjalizacja Psalma (tylko jeśli brakuje pliku konfiguracyjnego)
       - name: Init Psalm config
         run: |
           if [ ! -f psalm.xml ]; then
             vendor/bin/psalm --init
-            # Wymuszamy poziom 3 (bezpieczeństwo) i włączamy Taint Analysis
+            # Ustawiamy poziom błędów i włączamy analizę bezpieczeństwa
             sed -i 's/<psalm/<psalm errorLevel="3"/' psalm.xml
+            # Dodajemy ignorowanie folderu vendor, żeby nie skanował bibliotek skanera
+            sed -i 's/<directory name="." \/>/<directory name="." \/><ignoreFiles><directory name="vendor" \/><\/ignoreFiles>/' psalm.xml
           fi
 
-      # KROK 4: Właściwe skanowanie bezpieczeństwa
       - name: Run Psalm Security Scan
+        # Uruchamiamy skanowanie
         run: vendor/bin/psalm --report=results.sarif --taint-analysis --no-cache
-        continue-on-error: true # Ważne: nie przerywa workflow, żeby zdążył wysłać raport
+        continue-on-error: true
 
-      # KROK 5: Wysyłanie wyników do zakładki "Security" w GitHub
       - name: Upload Security Analysis results to GitHub
         uses: github/codeql-action/upload-sarif@v3
         with:
